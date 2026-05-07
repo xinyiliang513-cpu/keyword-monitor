@@ -1,9 +1,42 @@
 import streamlit as st
 import pandas as pd
+import requests
 
 st.set_page_config(page_title="Keyword Leakage Monitor", layout="wide")
 
 st.title("🔍 Keyword Leakage Monitor")
+SERPAPI_KEY = st.secrets["SERPAPI_KEY"]
+
+def search_facebook(keyword):
+
+    query = f'site:facebook.com "{keyword}"'
+
+    url = "https://serpapi.com/search.json"
+
+    params = {
+        "engine": "google",
+        "q": query,
+        "api_key": SERPAPI_KEY
+    }
+
+    response = requests.get(url, params=params)
+
+    data = response.json()
+
+    results = []
+
+    if "organic_results" in data:
+
+        for item in data["organic_results"][:5]:
+
+            results.append({
+                "Keyword": keyword,
+                "Title": item.get("title", ""),
+                "Link": item.get("link", ""),
+                "Snippet": item.get("snippet", "")
+            })
+
+    return results
 
 tab1, tab2 = st.tabs(["Facebook Full Search", "YouTube Daily Search"])
 
@@ -81,4 +114,28 @@ with tab2:
         else:
             st.success("Quota check passed")
 
-        st.dataframe(result_df)
+if st.button("Run Facebook Search"):
+
+    search_results = []
+
+    for keyword in result_df["Keyword"]:
+
+        try:
+            results = search_facebook(keyword)
+
+            for r in results:
+                search_results.append(r)
+
+        except Exception as e:
+            st.error(f"Error searching {keyword}: {e}")
+
+    if search_results:
+
+        final_df = pd.DataFrame(search_results)
+
+        st.success(f"Found {len(final_df)} possible matches")
+
+        st.dataframe(final_df)
+
+    else:
+        st.warning("No results found")
