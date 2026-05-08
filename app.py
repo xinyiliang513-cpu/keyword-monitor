@@ -9,6 +9,7 @@ st.set_page_config(page_title="Keyword Leakage Monitor", layout="wide")
 st.title("🔍 Keyword Leakage Monitor")
 
 SERPAPI_KEY = st.secrets["SERPAPI_KEY"]
+YOUTUBE_API_KEY = st.secrets["YOUTUBE_API_KEY"]
 
 FACEBOOK_DAILY_LIMIT = 10
 YOUTUBE_DAILY_LIMIT = 10
@@ -68,6 +69,41 @@ def search_facebook(keyword):
                 "Title / Content": item.get("title", ""),
                 "URL": item.get("link", ""),
                 "Snippet": item.get("snippet", ""),
+                "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+    return results
+
+
+def search_youtube(keyword):
+    url = "https://www.googleapis.com/youtube/v3/search"
+
+    params = {
+        "part": "snippet",
+        "q": keyword,
+        "key": YOUTUBE_API_KEY,
+        "maxResults": 5,
+        "type": "video"
+    }
+
+    response = requests.get(url, params=params, timeout=20)
+    data = response.json()
+
+    results = []
+
+    if "items" in data:
+        for item in data["items"]:
+            video_id = item["id"]["videoId"]
+            snippet = item["snippet"]
+
+            results.append({
+                "Platform": "YouTube",
+                "Keyword": keyword,
+                "Title / Content": snippet.get("title", ""),
+                "Channel": snippet.get("channelTitle", ""),
+                "Published Time": snippet.get("publishedAt", ""),
+                "URL": f"https://www.youtube.com/watch?v={video_id}",
+                "Snippet": snippet.get("description", ""),
                 "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
 
@@ -193,7 +229,52 @@ with tab2:
             st.success("Quota check passed")
             st.dataframe(yt_df)
 
-            st.warning(
-                "YouTube search API has not been connected yet. "
-                "This tab currently only checks the daily keyword quota."
-            )
+            if st.button("Run YouTube Search"):
+                yt_results = []
+
+                with st.spinner("Searching YouTube public videos..."):
+                    for _, row in yt_df.iterrows():
+                        keyword = row["Keyword"]
+
+                        try:
+                            results = search_youtube(keyword)
+
+                            for r in results:
+                                r["Project"] = row["Project"]
+                                r["Language"] = row["Language"]
+                                yt_results.append(r)
+
+                        except Exception as e:
+                            st.error(f"Error searching {keyword}: {e}")
+
+                if yt_results:
+                    yt_final_df = pd.DataFrame(yt_results)
+
+                    yt_final_df = yt_final_df[
+                        [
+                            "Platform",
+                            "Project",
+                            "Language",
+                            "Keyword",
+                            "Title / Content",
+                            "Channel",
+                            "Published Time",
+                            "Snippet",
+                            "URL",
+                            "Alert Time"
+                        ]
+                    ]
+
+                    st.success(f"Found {len(yt_final_df)} YouTube results")
+                    st.dataframe(yt_final_df)
+
+                    excel_data = convert_df_to_excel(yt_final_df)
+
+                    st.download_button(
+                        label="Download YouTube Alert Excel",
+                        data=excel_data,
+                        file_name="youtube_alert_results.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+                else:
+                    st.warning("No YouTube results found")
