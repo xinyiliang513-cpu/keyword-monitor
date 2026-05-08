@@ -15,24 +15,30 @@ YOUTUBE_DAILY_LIMIT = 10
 
 
 def parse_keyword_excel(uploaded_file, platform):
-    sheets = pd.read_excel(uploaded_file, sheet_name=None)
+    if platform == "Facebook":
+        sheet_name = "Facebook_Daily"
+    elif platform == "YouTube":
+        sheet_name = "YouTube_Daily"
+    else:
+        raise ValueError("Unsupported platform")
+
+    df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
 
     all_data = []
 
-    for project_name, df in sheets.items():
-        for column in df.columns:
-            keywords = df[column].dropna().tolist()
+    for column in df.columns:
+        keywords = df[column].dropna().tolist()
 
-            for keyword in keywords:
-                keyword = str(keyword).strip()
+        for keyword in keywords:
+            keyword = str(keyword).strip()
 
-                if keyword:
-                    all_data.append({
-                        "Project": project_name,
-                        "Language": column,
-                        "Keyword": keyword,
-                        "Platform": platform
-                    })
+            if keyword:
+                all_data.append({
+                    "Project": sheet_name,
+                    "Language": column,
+                    "Keyword": keyword,
+                    "Platform": platform
+                })
 
     return pd.DataFrame(all_data)
 
@@ -100,7 +106,10 @@ with tab1:
         st.info(f"Current keyword count: {keyword_count}")
 
         if keyword_count > FACEBOOK_DAILY_LIMIT:
-            st.error(f"Quota exceeded! Daily limit is {FACEBOOK_DAILY_LIMIT}. Please upload no more than {FACEBOOK_DAILY_LIMIT} keywords.")
+            st.error(
+                f"Quota exceeded! Daily limit is {FACEBOOK_DAILY_LIMIT}. "
+                f"Please upload no more than {FACEBOOK_DAILY_LIMIT} keywords."
+            )
             st.dataframe(fb_df)
         else:
             st.success("Quota check passed")
@@ -175,10 +184,16 @@ with tab2:
         st.info(f"Current keyword count: {keyword_count}")
 
         if keyword_count > YOUTUBE_DAILY_LIMIT:
-            st.error(f"Quota exceeded! Daily limit is {YOUTUBE_DAILY_LIMIT}. Please upload no more than {YOUTUBE_DAILY_LIMIT} keywords.")
+            st.error(
+                f"Quota exceeded! Daily limit is {YOUTUBE_DAILY_LIMIT}. "
+                f"Please upload no more than {YOUTUBE_DAILY_LIMIT} keywords."
+            )
             st.dataframe(yt_df)
         else:
             st.success("Quota check passed")
             st.dataframe(yt_df)
 
-            st.warning("YouTube search API has not been connected yet. This tab currently only checks the daily keyword quota.")
+            st.warning(
+                "YouTube search API has not been connected yet. "
+                "This tab currently only checks the daily keyword quota."
+            )
