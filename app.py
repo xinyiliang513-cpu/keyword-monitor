@@ -25,21 +25,23 @@ def parse_keyword_excel(uploaded_file, platform):
 
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
 
+    if "Keyword" not in df.columns:
+        st.error(f"The sheet '{sheet_name}' must contain a column named 'Keyword'.")
+        return pd.DataFrame(columns=["Project", "Keyword", "Platform"])
+
+    keywords = df["Keyword"].dropna().tolist()
+
     all_data = []
 
-    for column in df.columns:
-        keywords = df[column].dropna().tolist()
+    for keyword in keywords:
+        keyword = str(keyword).strip()
 
-        for keyword in keywords:
-            keyword = str(keyword).strip()
-
-            if keyword:
-                all_data.append({
-                    "Project": sheet_name,
-                    "Language": column,
-                    "Keyword": keyword,
-                    "Platform": platform
-                })
+        if keyword:
+            all_data.append({
+                "Project": sheet_name,
+                "Keyword": keyword,
+                "Platform": platform
+            })
 
     return pd.DataFrame(all_data)
 
@@ -67,8 +69,8 @@ def search_facebook(keyword):
                 "Platform": "Facebook",
                 "Keyword": keyword,
                 "Title / Content": item.get("title", ""),
-                "URL": item.get("link", ""),
                 "Snippet": item.get("snippet", ""),
+                "URL": item.get("link", ""),
                 "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
 
@@ -102,8 +104,8 @@ def search_youtube(keyword):
                 "Title / Content": snippet.get("title", ""),
                 "Channel": snippet.get("channelTitle", ""),
                 "Published Time": snippet.get("publishedAt", ""),
-                "URL": f"https://www.youtube.com/watch?v={video_id}",
                 "Snippet": snippet.get("description", ""),
+                "URL": f"https://www.youtube.com/watch?v={video_id}",
                 "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
 
@@ -163,7 +165,6 @@ with tab1:
 
                             for r in results:
                                 r["Project"] = row["Project"]
-                                r["Language"] = row["Language"]
                                 search_results.append(r)
 
                         except Exception as e:
@@ -176,7 +177,6 @@ with tab1:
                         [
                             "Platform",
                             "Project",
-                            "Language",
                             "Keyword",
                             "Title / Content",
                             "Snippet",
@@ -241,7 +241,6 @@ with tab2:
 
                             for r in results:
                                 r["Project"] = row["Project"]
-                                r["Language"] = row["Language"]
                                 yt_results.append(r)
 
                         except Exception as e:
@@ -254,7 +253,6 @@ with tab2:
                         [
                             "Platform",
                             "Project",
-                            "Language",
                             "Keyword",
                             "Title / Content",
                             "Channel",
