@@ -16,6 +16,61 @@ YOUTUBE_DAILY_LIMIT = 10
 TIKTOK_DAILY_LIMIT = 10
 
 
+def calculate_priority(keyword, title="", snippet="", url="", author=""):
+    keyword = str(keyword).lower().strip()
+    text = f"{title} {snippet} {url} {author}".lower()
+
+    score = 0
+    reasons = []
+
+    if keyword and keyword in text:
+        score += 50
+        reasons.append("Exact keyword matched")
+
+    if keyword and keyword in str(title).lower():
+        score += 30
+        reasons.append("Keyword matched in title/content")
+
+    if keyword and keyword in str(snippet).lower():
+        score += 20
+        reasons.append("Keyword matched in description/snippet")
+
+    if keyword and keyword in str(url).lower():
+        score += 20
+        reasons.append("Keyword matched in URL")
+
+    if keyword and keyword in str(author).lower():
+        score += 20
+        reasons.append("Keyword matched in author/account")
+
+    if score >= 70:
+        priority = "High"
+    elif score >= 40:
+        priority = "Medium"
+    else:
+        priority = "Low"
+
+    return score, priority, "; ".join(reasons) if reasons else "Weak relevance only"
+
+
+def add_priority_fields(result):
+    score, priority, reason = calculate_priority(
+        keyword=result.get("Keyword", ""),
+        title=result.get("Title / Content", ""),
+        snippet=result.get("Snippet", ""),
+        url=result.get("URL", ""),
+        author=result.get("Author", "") or result.get("Channel", "")
+    )
+
+    result["Match Score"] = score
+    result["Priority"] = priority
+    result["Match Reason"] = reason
+    result["Review Result"] = ""
+    result["Reviewer Notes"] = ""
+
+    return result
+
+
 def parse_keyword_excel(uploaded_file, platform):
     sheet_map = {
         "Facebook": "Facebook_Daily",
@@ -24,9 +79,6 @@ def parse_keyword_excel(uploaded_file, platform):
     }
 
     sheet_name = sheet_map.get(platform)
-    if not sheet_name:
-        raise ValueError("Unsupported platform")
-
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
 
     if "Keyword" not in df.columns:
@@ -64,14 +116,15 @@ def search_facebook(keyword):
     results = []
 
     for item in data.get("organic_results", [])[:5]:
-        results.append({
+        result = {
             "Platform": "Facebook",
             "Keyword": keyword,
             "Title / Content": item.get("title", ""),
             "Snippet": item.get("snippet", ""),
             "URL": item.get("link", ""),
             "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
+        }
+        results.append(add_priority_fields(result))
 
     return results
 
@@ -96,7 +149,7 @@ def search_youtube(keyword):
         video_id = item["id"].get("videoId", "")
         snippet = item.get("snippet", {})
 
-        results.append({
+        result = {
             "Platform": "YouTube",
             "Keyword": keyword,
             "Title / Content": snippet.get("title", ""),
@@ -105,20 +158,16 @@ def search_youtube(keyword):
             "Snippet": snippet.get("description", ""),
             "URL": f"https://www.youtube.com/watch?v={video_id}",
             "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
+        }
+        results.append(add_priority_fields(result))
 
     return results
 
 
 def search_tiktok(keyword):
-    url = (
-        "https://api.apify.com/v2/acts/"
-        "clockworks~tiktok-scraper/run-sync-get-dataset-items"
-    )
+    url = "https://api.apify.com/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items"
 
-    params = {
-        "token": APIFY_TOKEN
-    }
+    params = {"token": APIFY_TOKEN}
 
     payload = {
         "searchQueries": [keyword],
@@ -149,7 +198,7 @@ def search_tiktok(keyword):
             or ""
         )
 
-        results.append({
+        result = {
             "Platform": "TikTok",
             "Keyword": keyword,
             "Title / Content": item.get("text", ""),
@@ -163,20 +212,28 @@ def search_tiktok(keyword):
             "Bookmark Count": item.get("collectCount", ""),
             "Duration": video_meta.get("duration", ""),
             "Music": music_meta.get("musicName", ""),
+            "Snippet": item.get("text", ""),
             "URL": video_url,
             "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        })
+        }
+        results.append(add_priority_fields(result))
 
     return results
 
 
 def convert_df_to_excel(df):
     output = BytesIO()
-
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Alert Results")
-
     return output.getvalue()
+
+
+def sort_by_priority(df):
+    priority_order = {"High": 1, "Medium": 2, "Low": 3}
+    df["Priority Order"] = df["Priority"].map(priority_order)
+    df = df.sort_values(by=["Priority Order", "Match Score"], ascending=[True, False])
+    df = df.drop(columns=["Priority Order"])
+    return df
 
 
 tab1, tab2, tab3 = st.tabs([
@@ -190,19 +247,13 @@ with tab1:
     st.header("Facebook Daily Rolling Search")
     st.info(f"Daily keyword limit: {FACEBOOK_DAILY_LIMIT}")
 
-    fb_file = st.file_uploader(
-        "Upload Daily Facebook Keyword Excel",
-        type=["xlsx"],
-        key="facebook"
-    )
+    fb_file = st.file_uploader("Upload Daily Facebook Keyword Excel", type=["xlsx"], key="facebook")
 
     if fb_file:
         fb_df = parse_keyword_excel(fb_file, "Facebook")
-        keyword_count = len(fb_df)
+        st.info(f"Current keyword count: {len(fb_df)}")
 
-        st.info(f"Current keyword count: {keyword_count}")
-
-        if keyword_count > FACEBOOK_DAILY_LIMIT:
+        if len(fb_df) > FACEBOOK_DAILY_LIMIT:
             st.error(f"Quota exceeded! Daily limit is {FACEBOOK_DAILY_LIMIT}.")
             st.dataframe(fb_df)
         else:
@@ -223,16 +274,22 @@ with tab1:
                             st.error(f"Error searching {row['Keyword']}: {e}")
 
                 if search_results:
-                    final_df = pd.DataFrame(search_results)
+                    final_df = sort_by_priority(pd.DataFrame(search_results))
+
                     final_df = final_df[
                         [
+                            "Priority",
+                            "Match Score",
+                            "Match Reason",
                             "Platform",
                             "Project",
                             "Keyword",
                             "Title / Content",
                             "Snippet",
                             "URL",
-                            "Alert Time"
+                            "Alert Time",
+                            "Review Result",
+                            "Reviewer Notes"
                         ]
                     ]
 
@@ -253,19 +310,13 @@ with tab2:
     st.header("YouTube Daily Rolling Search")
     st.info(f"Daily keyword limit: {YOUTUBE_DAILY_LIMIT}")
 
-    yt_file = st.file_uploader(
-        "Upload Daily YouTube Keyword Excel",
-        type=["xlsx"],
-        key="youtube"
-    )
+    yt_file = st.file_uploader("Upload Daily YouTube Keyword Excel", type=["xlsx"], key="youtube")
 
     if yt_file:
         yt_df = parse_keyword_excel(yt_file, "YouTube")
-        keyword_count = len(yt_df)
+        st.info(f"Current keyword count: {len(yt_df)}")
 
-        st.info(f"Current keyword count: {keyword_count}")
-
-        if keyword_count > YOUTUBE_DAILY_LIMIT:
+        if len(yt_df) > YOUTUBE_DAILY_LIMIT:
             st.error(f"Quota exceeded! Daily limit is {YOUTUBE_DAILY_LIMIT}.")
             st.dataframe(yt_df)
         else:
@@ -286,9 +337,13 @@ with tab2:
                             st.error(f"Error searching {row['Keyword']}: {e}")
 
                 if yt_results:
-                    yt_final_df = pd.DataFrame(yt_results)
+                    yt_final_df = sort_by_priority(pd.DataFrame(yt_results))
+
                     yt_final_df = yt_final_df[
                         [
+                            "Priority",
+                            "Match Score",
+                            "Match Reason",
                             "Platform",
                             "Project",
                             "Keyword",
@@ -297,7 +352,9 @@ with tab2:
                             "Published Time",
                             "Snippet",
                             "URL",
-                            "Alert Time"
+                            "Alert Time",
+                            "Review Result",
+                            "Reviewer Notes"
                         ]
                     ]
 
@@ -318,19 +375,13 @@ with tab3:
     st.header("TikTok Daily Rolling Search")
     st.info(f"Daily keyword limit: {TIKTOK_DAILY_LIMIT}")
 
-    tk_file = st.file_uploader(
-        "Upload Daily TikTok Keyword Excel",
-        type=["xlsx"],
-        key="tiktok"
-    )
+    tk_file = st.file_uploader("Upload Daily TikTok Keyword Excel", type=["xlsx"], key="tiktok")
 
     if tk_file:
         tk_df = parse_keyword_excel(tk_file, "TikTok")
-        keyword_count = len(tk_df)
+        st.info(f"Current keyword count: {len(tk_df)}")
 
-        st.info(f"Current keyword count: {keyword_count}")
-
-        if keyword_count > TIKTOK_DAILY_LIMIT:
+        if len(tk_df) > TIKTOK_DAILY_LIMIT:
             st.error(f"Quota exceeded! Daily limit is {TIKTOK_DAILY_LIMIT}.")
             st.dataframe(tk_df)
         else:
@@ -351,9 +402,13 @@ with tab3:
                             st.error(f"Error searching {row['Keyword']}: {e}")
 
                 if tk_results:
-                    tk_final_df = pd.DataFrame(tk_results)
+                    tk_final_df = sort_by_priority(pd.DataFrame(tk_results))
+
                     tk_final_df = tk_final_df[
                         [
+                            "Priority",
+                            "Match Score",
+                            "Match Reason",
                             "Platform",
                             "Project",
                             "Keyword",
@@ -369,7 +424,9 @@ with tab3:
                             "Duration",
                             "Music",
                             "URL",
-                            "Alert Time"
+                            "Alert Time",
+                            "Review Result",
+                            "Reviewer Notes"
                         ]
                     ]
 
