@@ -259,6 +259,14 @@ def sort_by_priority(df):
     df = df.drop(columns=["Priority Order"])
     return df
 
+def deduplicate_results(df):
+    if "URL" in df.columns:
+        df = df.drop_duplicates(subset=["URL"], keep="first")
+
+    if "Title / Content" in df.columns and "Keyword" in df.columns:
+        df = df.drop_duplicates(subset=["Platform", "Keyword", "Title / Content"], keep="first")
+
+    return df
 
 def run_platform_tab(platform, limit, uploader_key, search_func, output_columns, download_name):
     st.header(f"{platform} Daily Rolling Search")
@@ -296,9 +304,11 @@ def run_platform_tab(platform, limit, uploader_key, search_func, output_columns,
                         except Exception as e:
                             st.error(f"Error searching {row['Keyword']}: {e}")
 
-                if all_results:
-                    final_df = sort_by_priority(pd.DataFrame(all_results))
-                    final_df = final_df[output_columns]
+if all_results:
+    final_df = deduplicate_results(pd.DataFrame(all_results))
+    final_df = sort_by_priority(final_df)
+
+    final_df = final_df[output_columns]
 
                     st.success(f"Found {len(final_df)} {platform} possible matches")
                     st.dataframe(final_df)
