@@ -5,6 +5,7 @@ from io import BytesIO
 from datetime import datetime
 
 st.set_page_config(page_title="Keyword Leakage Monitor", layout="wide")
+
 st.title("🔍 Keyword Leakage Monitor")
 
 SERPAPI_KEY = st.secrets["SERPAPI_KEY"]
@@ -73,6 +74,19 @@ def add_priority_fields(result):
     return result
 
 
+def deduplicate_results(df):
+    if "URL" in df.columns:
+        df = df.drop_duplicates(subset=["URL"], keep="first")
+
+    if "Title / Content" in df.columns and "Keyword" in df.columns:
+        df = df.drop_duplicates(
+            subset=["Platform", "Keyword", "Title / Content"],
+            keep="first"
+        )
+
+    return df
+
+
 def parse_keyword_excel(uploaded_file, platform):
     sheet_map = {
         "Facebook": "Facebook_Daily",
@@ -83,6 +97,7 @@ def parse_keyword_excel(uploaded_file, platform):
     }
 
     sheet_name = sheet_map.get(platform)
+
     df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
 
     if "Keyword" not in df.columns:
@@ -115,6 +130,7 @@ def search_google_query(keyword, platform_name, query):
     }
 
     response = requests.get(url, params=params, timeout=20)
+
     data = response.json()
 
     results = []
@@ -128,6 +144,7 @@ def search_google_query(keyword, platform_name, query):
             "URL": item.get("link", ""),
             "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
+
         results.append(add_priority_fields(result))
 
     return results
@@ -163,6 +180,7 @@ def search_youtube(keyword):
     }
 
     response = requests.get(url, params=params, timeout=20)
+
     data = response.json()
 
     results = []
@@ -181,6 +199,7 @@ def search_youtube(keyword):
             "URL": f"https://www.youtube.com/watch?v={video_id}",
             "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
+
         results.append(add_priority_fields(result))
 
     return results
@@ -189,7 +208,9 @@ def search_youtube(keyword):
 def search_tiktok(keyword):
     url = "https://api.apify.com/v2/acts/clockworks~tiktok-scraper/run-sync-get-dataset-items"
 
-    params = {"token": APIFY_TOKEN}
+    params = {
+        "token": APIFY_TOKEN
+    }
 
     payload = {
         "searchQueries": [keyword],
@@ -200,12 +221,18 @@ def search_tiktok(keyword):
         "shouldDownloadSlideshowImages": False
     }
 
-    response = requests.post(url, params=params, json=payload, timeout=180)
+    response = requests.post(
+        url,
+        params=params,
+        json=payload,
+        timeout=180
+    )
 
     if response.status_code not in [200, 201]:
-        raise Exception(f"Apify API error: {response.status_code} - {response.text}")
+        raise Exception(f"Apify API error: {response.status_code}")
 
     data = response.json()
+
     results = []
 
     for item in data:
@@ -238,6 +265,7 @@ def search_tiktok(keyword):
             "URL": video_url,
             "Alert Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
+
         results.append(add_priority_fields(result))
 
     return results
@@ -253,23 +281,34 @@ def convert_df_to_excel(df):
 
 
 def sort_by_priority(df):
-    priority_order = {"High": 1, "Medium": 2, "Low": 3}
+    priority_order = {
+        "High": 1,
+        "Medium": 2,
+        "Low": 3
+    }
+
     df["Priority Order"] = df["Priority"].map(priority_order)
-    df = df.sort_values(by=["Priority Order", "Match Score"], ascending=[True, False])
+
+    df = df.sort_values(
+        by=["Priority Order", "Match Score"],
+        ascending=[True, False]
+    )
+
     df = df.drop(columns=["Priority Order"])
-    return df
-
-def deduplicate_results(df):
-    if "URL" in df.columns:
-        df = df.drop_duplicates(subset=["URL"], keep="first")
-
-    if "Title / Content" in df.columns and "Keyword" in df.columns:
-        df = df.drop_duplicates(subset=["Platform", "Keyword", "Title / Content"], keep="first")
 
     return df
 
-def run_platform_tab(platform, limit, uploader_key, search_func, output_columns, download_name):
+
+def run_platform_tab(
+    platform,
+    limit,
+    uploader_key,
+    search_func,
+    output_columns,
+    download_name
+):
     st.header(f"{platform} Daily Rolling Search")
+
     st.info(f"Daily keyword limit: {limit}")
 
     uploaded_file = st.file_uploader(
@@ -280,20 +319,25 @@ def run_platform_tab(platform, limit, uploader_key, search_func, output_columns,
 
     if uploaded_file:
         df = parse_keyword_excel(uploaded_file, platform)
+
         st.info(f"Current keyword count: {len(df)}")
 
         if len(df) > limit:
             st.error(f"Quota exceeded! Daily limit is {limit}.")
             st.dataframe(df)
+
         else:
             st.success("Quota check passed")
+
             st.dataframe(df)
 
             if st.button(f"Run {platform} Search"):
                 all_results = []
 
                 with st.spinner(f"Searching {platform} public results..."):
+
                     for _, row in df.iterrows():
+
                         try:
                             results = search_func(row["Keyword"])
 
@@ -304,13 +348,20 @@ def run_platform_tab(platform, limit, uploader_key, search_func, output_columns,
                         except Exception as e:
                             st.error(f"Error searching {row['Keyword']}: {e}")
 
-if all_results:
-    final_df = deduplicate_results(pd.DataFrame(all_results))
-    final_df = sort_by_priority(final_df)
+                if all_results:
 
-    final_df = final_df[output_columns]
+                    final_df = deduplicate_results(
+                        pd.DataFrame(all_results)
+                    )
 
-                    st.success(f"Found {len(final_df)} {platform} possible matches")
+                    final_df = sort_by_priority(final_df)
+
+                    final_df = final_df[output_columns]
+
+                    st.success(
+                        f"Found {len(final_df)} {platform} possible matches"
+                    )
+
                     st.dataframe(final_df)
 
                     st.download_button(
@@ -319,6 +370,7 @@ if all_results:
                         file_name=download_name,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
+
                 else:
                     st.warning(f"No {platform} results found")
 
@@ -347,6 +399,7 @@ common_columns = [
     "Reviewer Notes"
 ]
 
+
 youtube_columns = [
     "Priority",
     "Match Score",
@@ -363,6 +416,7 @@ youtube_columns = [
     "Review Result",
     "Reviewer Notes"
 ]
+
 
 tiktok_columns = [
     "Priority",
