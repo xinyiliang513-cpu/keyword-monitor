@@ -15,6 +15,7 @@ FACEBOOK_DAILY_LIMIT = 10
 YOUTUBE_DAILY_LIMIT = 10
 TIKTOK_DAILY_LIMIT = 5
 INSTAGRAM_DAILY_LIMIT = 5
+TWITTER_DAILY_LIMIT = 5
 
 
 def calculate_priority(keyword, title="", snippet="", url="", author=""):
@@ -78,6 +79,7 @@ def parse_keyword_excel(uploaded_file, platform):
         "YouTube": "YouTube_Daily",
         "TikTok": "TikTok_Daily",
         "Instagram": "Instagram_Daily",
+        "Twitter": "Twitter_Daily",
     }
 
     sheet_name = sheet_map.get(platform)
@@ -102,8 +104,7 @@ def parse_keyword_excel(uploaded_file, platform):
     return pd.DataFrame(all_data)
 
 
-def search_google_site(keyword, platform_name, site_domain):
-    query = f'site:{site_domain} "{keyword}"'
+def search_google_query(keyword, platform_name, query):
     url = "https://serpapi.com/search.json"
 
     params = {
@@ -132,12 +133,22 @@ def search_google_site(keyword, platform_name, site_domain):
     return results
 
 
+def search_google_site(keyword, platform_name, site_domain):
+    query = f'site:{site_domain} "{keyword}"'
+    return search_google_query(keyword, platform_name, query)
+
+
 def search_facebook(keyword):
     return search_google_site(keyword, "Facebook", "facebook.com")
 
 
 def search_instagram(keyword):
     return search_google_site(keyword, "Instagram", "instagram.com")
+
+
+def search_twitter(keyword):
+    query = f'(site:x.com OR site:twitter.com) "{keyword}"'
+    return search_google_query(keyword, "Twitter", query)
 
 
 def search_youtube(keyword):
@@ -234,8 +245,10 @@ def search_tiktok(keyword):
 
 def convert_df_to_excel(df):
     output = BytesIO()
+
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="Alert Results")
+
     return output.getvalue()
 
 
@@ -300,11 +313,12 @@ def run_platform_tab(platform, limit, uploader_key, search_func, output_columns,
                     st.warning(f"No {platform} results found")
 
 
-tab1, tab2, tab3, tab4 = st.tabs([
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "Facebook Daily Rolling Search",
     "YouTube Daily Rolling Search",
     "TikTok Daily Rolling Search",
-    "Instagram Daily Rolling Search"
+    "Instagram Daily Rolling Search",
+    "Twitter Daily Rolling Search"
 ])
 
 
@@ -406,4 +420,15 @@ with tab4:
         search_func=search_instagram,
         output_columns=common_columns,
         download_name="instagram_alert_results.xlsx"
+    )
+
+
+with tab5:
+    run_platform_tab(
+        platform="Twitter",
+        limit=TWITTER_DAILY_LIMIT,
+        uploader_key="twitter",
+        search_func=search_twitter,
+        output_columns=common_columns,
+        download_name="twitter_alert_results.xlsx"
     )
