@@ -13,7 +13,8 @@ APIFY_TOKEN = st.secrets["APIFY_TOKEN"]
 
 FACEBOOK_DAILY_LIMIT = 10
 YOUTUBE_DAILY_LIMIT = 10
-TIKTOK_DAILY_LIMIT = 10
+TIKTOK_DAILY_LIMIT = 5
+INSTAGRAM_DAILY_LIMIT = 5
 
 
 def calculate_priority(keyword, title="", snippet="", url="", author=""):
@@ -76,6 +77,7 @@ def parse_keyword_excel(uploaded_file, platform):
         "Facebook": "Facebook_Daily",
         "YouTube": "YouTube_Daily",
         "TikTok": "TikTok_Daily",
+        "Instagram": "Instagram_Daily",
     }
 
     sheet_name = sheet_map.get(platform)
@@ -89,7 +91,8 @@ def parse_keyword_excel(uploaded_file, platform):
 
     for keyword in df["Keyword"].dropna().tolist():
         keyword = str(keyword).strip()
-        if keyword:
+
+        if keyword and keyword.upper() != "DO NOT USE":
             all_data.append({
                 "Project": sheet_name,
                 "Keyword": keyword,
@@ -99,8 +102,8 @@ def parse_keyword_excel(uploaded_file, platform):
     return pd.DataFrame(all_data)
 
 
-def search_facebook(keyword):
-    query = f'site:facebook.com "{keyword}"'
+def search_google_site(keyword, platform_name, site_domain):
+    query = f'site:{site_domain} "{keyword}"'
     url = "https://serpapi.com/search.json"
 
     params = {
@@ -117,7 +120,7 @@ def search_facebook(keyword):
 
     for item in data.get("organic_results", [])[:5]:
         result = {
-            "Platform": "Facebook",
+            "Platform": platform_name,
             "Keyword": keyword,
             "Title / Content": item.get("title", ""),
             "Snippet": item.get("snippet", ""),
@@ -127,6 +130,14 @@ def search_facebook(keyword):
         results.append(add_priority_fields(result))
 
     return results
+
+
+def search_facebook(keyword):
+    return search_google_site(keyword, "Facebook", "facebook.com")
+
+
+def search_instagram(keyword):
+    return search_google_site(keyword, "Instagram", "instagram.com")
 
 
 def search_youtube(keyword):
@@ -236,208 +247,163 @@ def sort_by_priority(df):
     return df
 
 
-tab1, tab2, tab3 = st.tabs([
-    "Facebook Daily Rolling Search",
-    "YouTube Daily Rolling Search",
-    "TikTok Daily Rolling Search"
-])
+def run_platform_tab(platform, limit, uploader_key, search_func, output_columns, download_name):
+    st.header(f"{platform} Daily Rolling Search")
+    st.info(f"Daily keyword limit: {limit}")
 
+    uploaded_file = st.file_uploader(
+        f"Upload Daily {platform} Keyword Excel",
+        type=["xlsx"],
+        key=uploader_key
+    )
 
-with tab1:
-    st.header("Facebook Daily Rolling Search")
-    st.info(f"Daily keyword limit: {FACEBOOK_DAILY_LIMIT}")
+    if uploaded_file:
+        df = parse_keyword_excel(uploaded_file, platform)
+        st.info(f"Current keyword count: {len(df)}")
 
-    fb_file = st.file_uploader("Upload Daily Facebook Keyword Excel", type=["xlsx"], key="facebook")
-
-    if fb_file:
-        fb_df = parse_keyword_excel(fb_file, "Facebook")
-        st.info(f"Current keyword count: {len(fb_df)}")
-
-        if len(fb_df) > FACEBOOK_DAILY_LIMIT:
-            st.error(f"Quota exceeded! Daily limit is {FACEBOOK_DAILY_LIMIT}.")
-            st.dataframe(fb_df)
+        if len(df) > limit:
+            st.error(f"Quota exceeded! Daily limit is {limit}.")
+            st.dataframe(df)
         else:
             st.success("Quota check passed")
-            st.dataframe(fb_df)
+            st.dataframe(df)
 
-            if st.button("Run Facebook Search"):
-                search_results = []
+            if st.button(f"Run {platform} Search"):
+                all_results = []
 
-                with st.spinner("Searching Facebook public results..."):
-                    for _, row in fb_df.iterrows():
+                with st.spinner(f"Searching {platform} public results..."):
+                    for _, row in df.iterrows():
                         try:
-                            results = search_facebook(row["Keyword"])
+                            results = search_func(row["Keyword"])
+
                             for r in results:
                                 r["Project"] = row["Project"]
-                                search_results.append(r)
+                                all_results.append(r)
+
                         except Exception as e:
                             st.error(f"Error searching {row['Keyword']}: {e}")
 
-                if search_results:
-                    final_df = sort_by_priority(pd.DataFrame(search_results))
+                if all_results:
+                    final_df = sort_by_priority(pd.DataFrame(all_results))
+                    final_df = final_df[output_columns]
 
-                    final_df = final_df[
-                        [
-                            "Priority",
-                            "Match Score",
-                            "Match Reason",
-                            "Platform",
-                            "Project",
-                            "Keyword",
-                            "Title / Content",
-                            "Snippet",
-                            "URL",
-                            "Alert Time",
-                            "Review Result",
-                            "Reviewer Notes"
-                        ]
-                    ]
-
-                    st.success(f"Found {len(final_df)} possible matches")
+                    st.success(f"Found {len(final_df)} {platform} possible matches")
                     st.dataframe(final_df)
 
                     st.download_button(
-                        label="Download Facebook Alert Excel",
+                        label=f"Download {platform} Alert Excel",
                         data=convert_df_to_excel(final_df),
-                        file_name="facebook_alert_results.xlsx",
+                        file_name=download_name,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
                 else:
-                    st.warning("No results found")
+                    st.warning(f"No {platform} results found")
+
+
+tab1, tab2, tab3, tab4 = st.tabs([
+    "Facebook Daily Rolling Search",
+    "YouTube Daily Rolling Search",
+    "TikTok Daily Rolling Search",
+    "Instagram Daily Rolling Search"
+])
+
+
+common_columns = [
+    "Priority",
+    "Match Score",
+    "Match Reason",
+    "Platform",
+    "Project",
+    "Keyword",
+    "Title / Content",
+    "Snippet",
+    "URL",
+    "Alert Time",
+    "Review Result",
+    "Reviewer Notes"
+]
+
+youtube_columns = [
+    "Priority",
+    "Match Score",
+    "Match Reason",
+    "Platform",
+    "Project",
+    "Keyword",
+    "Title / Content",
+    "Channel",
+    "Published Time",
+    "Snippet",
+    "URL",
+    "Alert Time",
+    "Review Result",
+    "Reviewer Notes"
+]
+
+tiktok_columns = [
+    "Priority",
+    "Match Score",
+    "Match Reason",
+    "Platform",
+    "Project",
+    "Keyword",
+    "Title / Content",
+    "Author",
+    "Author Nickname",
+    "Published Time",
+    "Play Count",
+    "Like Count",
+    "Comment Count",
+    "Share Count",
+    "Bookmark Count",
+    "Duration",
+    "Music",
+    "URL",
+    "Alert Time",
+    "Review Result",
+    "Reviewer Notes"
+]
+
+
+with tab1:
+    run_platform_tab(
+        platform="Facebook",
+        limit=FACEBOOK_DAILY_LIMIT,
+        uploader_key="facebook",
+        search_func=search_facebook,
+        output_columns=common_columns,
+        download_name="facebook_alert_results.xlsx"
+    )
 
 
 with tab2:
-    st.header("YouTube Daily Rolling Search")
-    st.info(f"Daily keyword limit: {YOUTUBE_DAILY_LIMIT}")
-
-    yt_file = st.file_uploader("Upload Daily YouTube Keyword Excel", type=["xlsx"], key="youtube")
-
-    if yt_file:
-        yt_df = parse_keyword_excel(yt_file, "YouTube")
-        st.info(f"Current keyword count: {len(yt_df)}")
-
-        if len(yt_df) > YOUTUBE_DAILY_LIMIT:
-            st.error(f"Quota exceeded! Daily limit is {YOUTUBE_DAILY_LIMIT}.")
-            st.dataframe(yt_df)
-        else:
-            st.success("Quota check passed")
-            st.dataframe(yt_df)
-
-            if st.button("Run YouTube Search"):
-                yt_results = []
-
-                with st.spinner("Searching YouTube public videos..."):
-                    for _, row in yt_df.iterrows():
-                        try:
-                            results = search_youtube(row["Keyword"])
-                            for r in results:
-                                r["Project"] = row["Project"]
-                                yt_results.append(r)
-                        except Exception as e:
-                            st.error(f"Error searching {row['Keyword']}: {e}")
-
-                if yt_results:
-                    yt_final_df = sort_by_priority(pd.DataFrame(yt_results))
-
-                    yt_final_df = yt_final_df[
-                        [
-                            "Priority",
-                            "Match Score",
-                            "Match Reason",
-                            "Platform",
-                            "Project",
-                            "Keyword",
-                            "Title / Content",
-                            "Channel",
-                            "Published Time",
-                            "Snippet",
-                            "URL",
-                            "Alert Time",
-                            "Review Result",
-                            "Reviewer Notes"
-                        ]
-                    ]
-
-                    st.success(f"Found {len(yt_final_df)} YouTube results")
-                    st.dataframe(yt_final_df)
-
-                    st.download_button(
-                        label="Download YouTube Alert Excel",
-                        data=convert_df_to_excel(yt_final_df),
-                        file_name="youtube_alert_results.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                else:
-                    st.warning("No YouTube results found")
+    run_platform_tab(
+        platform="YouTube",
+        limit=YOUTUBE_DAILY_LIMIT,
+        uploader_key="youtube",
+        search_func=search_youtube,
+        output_columns=youtube_columns,
+        download_name="youtube_alert_results.xlsx"
+    )
 
 
 with tab3:
-    st.header("TikTok Daily Rolling Search")
-    st.info(f"Daily keyword limit: {TIKTOK_DAILY_LIMIT}")
+    run_platform_tab(
+        platform="TikTok",
+        limit=TIKTOK_DAILY_LIMIT,
+        uploader_key="tiktok",
+        search_func=search_tiktok,
+        output_columns=tiktok_columns,
+        download_name="tiktok_alert_results.xlsx"
+    )
 
-    tk_file = st.file_uploader("Upload Daily TikTok Keyword Excel", type=["xlsx"], key="tiktok")
 
-    if tk_file:
-        tk_df = parse_keyword_excel(tk_file, "TikTok")
-        st.info(f"Current keyword count: {len(tk_df)}")
-
-        if len(tk_df) > TIKTOK_DAILY_LIMIT:
-            st.error(f"Quota exceeded! Daily limit is {TIKTOK_DAILY_LIMIT}.")
-            st.dataframe(tk_df)
-        else:
-            st.success("Quota check passed")
-            st.dataframe(tk_df)
-
-            if st.button("Run TikTok Search"):
-                tk_results = []
-
-                with st.spinner("Searching TikTok public videos..."):
-                    for _, row in tk_df.iterrows():
-                        try:
-                            results = search_tiktok(row["Keyword"])
-                            for r in results:
-                                r["Project"] = row["Project"]
-                                tk_results.append(r)
-                        except Exception as e:
-                            st.error(f"Error searching {row['Keyword']}: {e}")
-
-                if tk_results:
-                    tk_final_df = sort_by_priority(pd.DataFrame(tk_results))
-
-                    tk_final_df = tk_final_df[
-                        [
-                            "Priority",
-                            "Match Score",
-                            "Match Reason",
-                            "Platform",
-                            "Project",
-                            "Keyword",
-                            "Title / Content",
-                            "Author",
-                            "Author Nickname",
-                            "Published Time",
-                            "Play Count",
-                            "Like Count",
-                            "Comment Count",
-                            "Share Count",
-                            "Bookmark Count",
-                            "Duration",
-                            "Music",
-                            "URL",
-                            "Alert Time",
-                            "Review Result",
-                            "Reviewer Notes"
-                        ]
-                    ]
-
-                    st.success(f"Found {len(tk_final_df)} TikTok results")
-                    st.dataframe(tk_final_df)
-
-                    st.download_button(
-                        label="Download TikTok Alert Excel",
-                        data=convert_df_to_excel(tk_final_df),
-                        file_name="tiktok_alert_results.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                else:
-                    st.warning("No TikTok results found")
+with tab4:
+    run_platform_tab(
+        platform="Instagram",
+        limit=INSTAGRAM_DAILY_LIMIT,
+        uploader_key="instagram",
+        search_func=search_instagram,
+        output_columns=common_columns,
+        download_name="instagram_alert_results.xlsx"
+    )
